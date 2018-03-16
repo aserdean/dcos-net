@@ -110,7 +110,12 @@ get_masters() ->
     end.
 
 get_masters_file() ->
-    {ok, FileBin} = file:read_file("/opt/mesosphere/etc/master_list"),
+    case os:getenv("MASTER_LIST_FILE") of
+        false ->
+            {ok, FileBin} = file:read_file("/opt/mesosphere/etc/master_list");
+        _ ->
+            {ok, FileBin} = file:read_file(os:getenv("MASTER_LIST_FILE"))
+    end,
     MastersBinIPs = jsx:decode(FileBin, [return_maps]),
     IPAddresses = lists:map(fun dcos_dns_app:parse_ipv4_address/1, MastersBinIPs),
     {ok, [{IPAddress, ?MESOS_DNS_PORT} || IPAddress <- IPAddresses]}.
