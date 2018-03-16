@@ -7,7 +7,11 @@
 
 -behaviour(application).
 
+-ifdef(WINDOWS).
+-define(DEFAULT_CONFIG_DIR, os:getenv("DCOS_NET_CONFIG_DIR")).
+-else.
 -define(DEFAULT_CONFIG_DIR, "/opt/mesosphere/etc/dcos-net.config.d").
+-endif.
 -define(MASTERS_KEY, {masters, riak_dt_orswot}).
 
 %% Application callbacks
