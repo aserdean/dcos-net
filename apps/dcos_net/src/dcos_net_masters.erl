@@ -1,6 +1,12 @@
 -module(dcos_net_masters).
 -behaviour(gen_server).
 
+-ifdef(WINDOWS).
+-define(USE_TELEMETRY, false).
+-else.
+-define(USE_TELEMETRY, true).
+-endif.
+
 %% API
 -export([start_link/0]).
 
@@ -55,7 +61,12 @@ update_masters([]) ->
 update_masters(MesosResolvers) ->
     Nodes = lists:map(fun resolver_to_node/1, MesosResolvers),
     Nodes0 = lists:delete(node(), Nodes),
-    telemetry_config:forwarder_destinations(Nodes),
+    case ?USE_TELEMETRY of
+        true ->
+            telemetry_config:forwarder_destinations(Nodes);
+        false ->
+            ok
+    end,
     lashup_hyparview_membership:update_masters(Nodes0).
 
 resolver_to_node({IP, _Port}) ->
