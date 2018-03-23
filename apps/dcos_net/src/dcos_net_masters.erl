@@ -2,9 +2,9 @@
 -behaviour(gen_server).
 
 -ifdef(WINDOWS).
--define(USE_TELEMETRY, false).
+-define(USE_TELEMETRY, ok).
 -else.
--define(USE_TELEMETRY, true).
+-define(USE_TELEMETRY, telemetry_config:forwarder_destinations(Nodes)).
 -endif.
 
 %% API
@@ -61,12 +61,7 @@ update_masters([]) ->
 update_masters(MesosResolvers) ->
     Nodes = lists:map(fun resolver_to_node/1, MesosResolvers),
     Nodes0 = lists:delete(node(), Nodes),
-    case ?USE_TELEMETRY of
-        true ->
-            telemetry_config:forwarder_destinations(Nodes);
-        false ->
-            ok
-    end,
+    ?USE_TELEMETRY,
     lashup_hyparview_membership:update_masters(Nodes0).
 
 resolver_to_node({IP, _Port}) ->
