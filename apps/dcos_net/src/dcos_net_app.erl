@@ -7,7 +7,6 @@
 
 -behaviour(application).
 
--define(DEFAULT_CONFIG_DIR, "/opt/mesosphere/etc/dcos-net.config.d").
 -define(MASTERS_KEY, {masters, riak_dt_orswot}).
 
 %% Application callbacks
@@ -69,20 +68,18 @@ load_config_files() ->
 
 -spec load_config_files(App :: atom()) -> ok.
 load_config_files(App) ->
-    case file:list_dir(?DEFAULT_CONFIG_DIR) of
+    ConfigDir = config_dir(),
+    case file:list_dir(ConfigDir) of
       {ok, []} ->
-        lager:info("Found an empty config directory: ~p", [?DEFAULT_CONFIG_DIR]);
+        lager:info("Found an empty config directory: ~p", [ConfigDir]);
       {error, enoent} ->
-        lager:info("Couldn't find config directory: ~p", [?DEFAULT_CONFIG_DIR]);
+        lager:info("Couldn't find config directory: ~p", [ConfigDir]);
       {ok, Filenames} ->
-        AbsFilenames = lists:map(fun abs_filename/1, Filenames),
         lists:foreach(fun (Filename) ->
-            load_config_file(App, Filename)
-        end, AbsFilenames)
+            AbsFilename = filename:absname(Filename, ConfigDir),
+            load_config_file(App, AbsFilename)
+        end, Filenames)
     end.
-
-abs_filename(Filename) ->
-    filename:absname(Filename, ?DEFAULT_CONFIG_DIR).
 
 load_config_file(App, Filename) ->
     case file:consult(Filename) of
@@ -115,11 +112,11 @@ load_app_config(_App, _AppOptions) ->
 
 -spec(dist_port() -> {ok, inet:port_number()} | {error, atom()}).
 dist_port() ->
+    ConfigDir = config_dir(),
     try
-        case erl_prim_loader:list_dir(?DEFAULT_CONFIG_DIR) of
+        case erl_prim_loader:list_dir(ConfigDir) of
             {ok, Filenames} ->
-                AbsFilenames = lists:map(fun abs_filename/1, Filenames),
-                dist_port(AbsFilenames);
+                dist_port(Filenames, ConfigDir);
             error ->
                 {error, list_dir}
         end
@@ -127,36 +124,22 @@ dist_port() ->
         {error, Err}
     end.
 
--spec(dist_port([file:filename()]) ->
+-spec(dist_port([file:filename()], file:filename()) ->
     {ok, inet:port_number()} | {error, atom()}).
-dist_port([]) ->
+dist_port([], _Dir) ->
     {error, not_found};
-dist_port([Filename|Filenames]) ->
-    case consult(Filename) of
+dist_port([Filename|Filenames], Dir) ->
+    AbsFilename = filename:absname(Filename, Dir),
+    case consult(AbsFilename) of
         {ok, Data} ->
-            case get_dist_port(Data) of
+            case find(dcos_net, dist_port, Data) of
                 {ok, Port} ->
                     {ok, Port};
                 {error, _Error} ->
-                    dist_port(Filenames)
+                    dist_port(Filenames, Dir)
             end;
         {error, _Error} ->
-            dist_port(Filenames)
-    end.
-
--spec(get_dist_port([{atom(), [{atom(), term()}]}]) ->
-    {ok, inet:port_number()} | {error, atom()}).
-get_dist_port(Data) ->
-    case lists:keyfind(dcos_net, 1, Data) of
-        {dcos_net, Config} ->
-            case lists:keyfind(dist_port, 1, Config) of
-                {dist_port, Port} ->
-                    {ok, Port};
-                false ->
-                    {error, not_found}
-            end;
-        false ->
-            {error, not_found}
+            dist_port(Filenames, Dir)
     end.
 
 -spec(consult(file:filename()) -> {ok, term()} | {error, term()}).
@@ -172,6 +155,86 @@ consult(Filename) ->
             end;
         {error, Error} ->
             {error, Error}
+    end.
+
+-spec(find(atom(), atom(), [{atom(), [{atom(), term()}]}]) ->
+    {ok, inet:port_number()} | {error, atom()}).
+find(App, Key, Data) ->
+    case lists:keyfind(App, 1, Data) of
+        {App, Config} ->
+            case lists:keyfind(Key, 1, Config) of
+                {Key, Port} ->
+                    {ok, Port};
+                false ->
+                    {error, not_found}
+            end;
+        false ->
+            {error, not_found}
+    end.
+
+
+%%====================================================================
+%% config dir
+%%====================================================================
+
+-define(DEFAULT_CONFIG_DIR, "/opt/mesosphere/etc/dcos-net.config.d").
+
+-type config_dir_r() :: {ok, file:filename()} | undefined.
+
+-spec(config_dir() -> file:filename()).
+config_dir() ->
+    config_dir([
+        fun config_dir_env/0,
+        fun config_dir_arg/0,
+        fun config_dir_sys/0
+    ]).
+
+-spec(config_dir([fun (() -> config_dir_r())]) -> file:filename()).
+config_dir([]) ->
+    ?DEFAULT_CONFIG_DIR;
+config_dir([Fun|Funs]) ->
+    case Fun() of
+        {ok, ConfigDir} ->
+            ConfigDir;
+        undefined ->
+            config_dir(Funs)
+    end.
+
+-spec(config_dir_env() -> config_dir_r()).
+config_dir_env() ->
+    application:get_env(dcos_net, config_dir).
+
+-spec(config_dir_arg() -> config_dir_r()).
+config_dir_arg() ->
+    case init:get_argument(dcos_net) of
+        {ok, Args} ->
+            case [V || ["config_dir", V] <- Args] of
+                [V|_] -> {ok, V};
+                [] -> undefined
+            end;
+        error -> undefined
+    end.
+
+-spec(config_dir_sys() -> config_dir_r()).
+config_dir_sys() ->
+    case init:get_argument(config) of
+        {ok, [SysConfig|_]} ->
+            config_dir_sys(SysConfig);
+        error -> undefined
+    end.
+
+-spec(config_dir_sys(file:filename()) -> config_dir_r()).
+config_dir_sys(SysConfig) ->
+    case consult(SysConfig) of
+        {ok, Data} ->
+            case find(dcos_net, config_dir, Data) of
+                {ok, ConfigDir} ->
+                    {ok, ConfigDir};
+                {error, _Error} ->
+                    undefined
+            end;
+        {error, _Error} ->
+            undefined
     end.
 
 %%====================================================================
